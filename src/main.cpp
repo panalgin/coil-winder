@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <SoftwareSerial.h>
 #include <Wire.h>
 #include <Keypad.h>
 #include <LiquidCrystal_I2C.h>
@@ -45,6 +46,9 @@ void printScreen(char lines[LCD_ROWS][LCD_COLS + 1]);
 void showMain();
 void showLive();
 void startWinding();
+void keypadEvent(KeypadEvent key);
+
+SoftwareSerial com(11, 12);
 
 void setup()
 {
@@ -55,11 +59,15 @@ void setup()
   digitalWrite(BUZZER_PIN, 0);
 
   Serial.begin(115200);
+  com.begin(115200);
+
   delay(500);
 
   lcd.init();
   lcd.backlight();
   watermark();
+
+  customKeypad.addEventListener(keypadEvent); // Add an event listener for this keypad
 }
 
 void watermark()
@@ -93,21 +101,29 @@ void loop()
   updateScreen();
 }
 
+char lastKey = '\0';
+
 void readInputs()
 {
   char key = customKeypad.getKey();
 
   if (key)
   {
-    Serial.println(key);
-
     switch (OpState)
     {
     case OperationState::None:
     {
-      if (key == 'C') {
+      if (key == 'C')
+      {
         startWinding();
       } // Enter
+
+      break;
+    }
+
+    case OperationState::Running:
+    {
+
       break;
     }
     }
@@ -171,15 +187,42 @@ void printScreen(char lines[LCD_ROWS][LCD_COLS + 1])
   for (uint8_t i = 0; i < LCD_ROWS; i++)
   {
     lcd.setCursor(0, i);
-    
-    for(uint8_t j = 0; j < LCD_COLS; j++) {
+
+    for (uint8_t j = 0; j < LCD_COLS; j++)
+    {
       lcd.print(lines[i][j]);
     }
   }
 }
 
-void startWinding() {
+void startWinding()
+{
   OpState = OperationState::Running;
   screenNeedsUpdate = true;
   //Offset, pedal ve motor devrede
+}
+
+// Taking care of some special events.
+void keypadEvent(KeypadEvent key)
+{
+  switch (customKeypad.getState())
+  {
+    case PRESSED:
+      Serial.print("Pressed: ");
+      Serial.println(key);
+
+      if (key == 'A')
+        com.println("Left");
+      else if (key == 'B')
+        com.println("Right");
+
+      break;
+      
+    case RELEASED:
+      Serial.print("Released: ");
+      Serial.println(key);
+
+      com.println("Stop");
+    break;
+  }
 }
