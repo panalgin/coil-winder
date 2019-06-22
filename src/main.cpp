@@ -47,6 +47,9 @@ void showMain();
 void showLive();
 void startWinding();
 void keypadEvent(KeypadEvent key);
+void playTone(uint8_t cycles, uint16_t tOn, uint16_t tOff);
+void parseMessage(String* message);
+void readComm();
 
 SoftwareSerial com(11, 12);
 
@@ -99,6 +102,30 @@ void loop()
 {
   readInputs();
   updateScreen();
+  readComm();
+}
+
+String inputMessage = "";
+
+void readComm() {
+  if (com.available()) {
+    char c = com.read();
+
+    if (c != '\n') {
+      inputMessage += c;
+    }
+    else
+      parseMessage(&inputMessage);    
+  }
+}
+
+void parseMessage(String* message) {
+  if (message->startsWith("Offset-First-Done"))
+    playTone(1, 200, 100);
+  else if (message->startsWith("Offset-Second-Done"))
+    playTone(2, 150, 50);
+
+  *message = "";
 }
 
 char lastKey = '\0';
@@ -117,6 +144,11 @@ void readInputs()
       {
         startWinding();
       } // Enter
+
+      else if (key == 'G')
+        com.println("Offset-First");
+      else if (key == 'H')
+        com.println("Offset-Second");
 
       break;
     }
@@ -202,15 +234,21 @@ void startWinding()
   //Offset, pedal ve motor devrede
 }
 
+void playTone(uint8_t cycles, uint16_t tOn, uint16_t tOff) {
+  for(uint8_t i = 0; i < cycles; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(tOn);
+    digitalWrite(BUZZER_PIN, LOW);
+    delay(tOff);
+  }
+}
+
 // Taking care of some special events.
 void keypadEvent(KeypadEvent key)
 {
   switch (customKeypad.getState())
   {
     case PRESSED:
-      Serial.print("Pressed: ");
-      Serial.println(key);
-
       if (key == 'A')
         com.println("Left");
       else if (key == 'B')
@@ -219,10 +257,12 @@ void keypadEvent(KeypadEvent key)
       break;
       
     case RELEASED:
-      Serial.print("Released: ");
-      Serial.println(key);
+      /*/Serial.print("Released: ");
+      Serial.println(key);*/
 
-      com.println("Stop");
+      if (key == 'A' || key == 'B')
+        com.println("Stop");
+
     break;
   }
 }
