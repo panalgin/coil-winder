@@ -12,10 +12,12 @@
 
 #define PEDAL_PIN A7
 #define BUZZER_PIN 13
+#define SPEED_POT_PIN A0
 
 typedef enum
 {
   None,
+  Offset,
   Running,
   Paused,
   Finished,
@@ -39,6 +41,25 @@ Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, KEY_ROWS, K
 
 LiquidCrystal_I2C lcd(0x3F, 20, 4);
 
+/* region Variables */
+
+char spirInput[5] = {'0', '0', '0', '0'};
+char wireDiaInput[4] = {'0', '0', '0'};
+
+uint8_t spirInputIndex = 0;
+uint8_t wireDiaInputIndex = 0;
+bool isInSecondRow = false;
+
+float karkasFirstPos = -1.0f;
+float karkasSecondPos = -1.0f;
+
+uint16_t totalSpir = 0;
+uint16_t currentSpir = 0;
+uint16_t speed = 0;
+float wireDiameter = 0.0f;
+
+/* endregion */
+
 void watermark();
 void readInputs();
 void updateScreen();
@@ -48,23 +69,30 @@ void showLive();
 void startWinding();
 void keypadEvent(KeypadEvent key);
 void playTone(uint8_t cycles, uint16_t tOn, uint16_t tOff);
-void parseMessage(String* message);
+void parseMessage(String *message);
 void readComm();
+void printInputValues();
+void startOffset();
+void showOffset();
+void updateOffsetParameters();
+uint16_t readSpeed();
+void updateRunningPartial();
 
-SoftwareSerial com(11, 12);
+SoftwareSerial com(A3, A2);
 
 void setup()
 {
   // put your setup code here, to run once:
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(PEDAL_PIN, INPUT_PULLUP);
+  pinMode(SPEED_POT_PIN, INPUT);
 
   digitalWrite(BUZZER_PIN, 0);
 
   Serial.begin(115200);
   com.begin(115200);
 
-  delay(500);
+  while (!com) {;}
 
   lcd.init();
   lcd.backlight();
@@ -107,23 +135,60 @@ void loop()
 
 String inputMessage = "";
 
-void readComm() {
-  if (com.available()) {
+void readComm()
+{
+  if (com.available())
+  {
     char c = com.read();
 
-    if (c != '\n') {
+    if (c != '\n')
+    {
       inputMessage += c;
     }
     else
-      parseMessage(&inputMessage);    
+      parseMessage(&inputMessage);
   }
 }
 
-void parseMessage(String* message) {
-  if (message->startsWith("Offset-First-Done"))
+void updateOffsetParameters()
+{
+  lcd.setCursor(0, 0);
+
+  if (karkasSecondPos >= 0)
+  {
+    char line[21];
+    lcd.print("                    ");
+    String rep = String(karkasSecondPos);
+    sprintf(line, "GENISLIK: %smm", rep.c_str());
+
+    lcd.setCursor(0, 0);
+    lcd.print(line);
+  }
+}
+
+void parseMessage(String *message)
+{
+  if (message->startsWith("OFD: "))
+  {
     playTone(1, 200, 100);
-  else if (message->startsWith("Offset-Second-Done"))
+
+    message->replace("OFD: ", "");
+
+    float firstPos = message->toFloat();
+
+    karkasFirstPos = firstPos;
+    updateOffsetParameters();
+  }
+  else if (message->startsWith("OSD: "))
+  {
     playTone(2, 150, 50);
+
+    message->replace("OSD: ", "");
+
+    float secondPos = message->toFloat();
+    karkasSecondPos = secondPos;
+    updateOffsetParameters();
+  }
 
   *message = "";
 }
@@ -141,13 +206,92 @@ void readInputs()
     case OperationState::None:
     {
       if (key == 'C')
-      {
-        startWinding();
-      } // Enter
+      { // Enter
+        startOffset();
+      }
 
-      else if (key == 'G')
+      else if (key == 'E')
+      { //Aşağı
+        isInSecondRow = true;
+        printInputValues();
+      }
+      else if (key == 'F')
+      { //Yukarı
+        isInSecondRow = false;
+        printInputValues();
+      }
+      else if (isDigit(key))
+      {
+        if (!isInSecondRow)
+        {
+          uint8_t pos = strlen(spirInput);
+
+          if (spirInputIndex == pos)
+            spirInputIndex--;
+
+          if (spirInputIndex < pos)
+          {
+            spirInput[spirInputIndex] = key;
+            spirInputIndex++;
+          }
+        }
+        else if (isInSecondRow)
+        {
+          uint8_t pos = strlen(wireDiaInput);
+
+          if (wireDiaInputIndex == pos)
+            wireDiaInputIndex--;
+
+          if (wireDiaInputIndex < pos)
+          {
+            wireDiaInput[wireDiaInputIndex] = key;
+            wireDiaInputIndex++;
+          }
+        }
+
+        printInputValues();
+      }
+      else if (key == 'D')
+      {
+        if (!isInSecondRow)
+        {
+          uint8_t len = strlen(spirInput);
+
+          if (spirInputIndex >= len)
+            spirInputIndex--;
+
+          spirInput[spirInputIndex] = '0';
+
+          if (spirInputIndex > 0)
+            spirInputIndex--;
+        }
+        else if (isInSecondRow)
+        {
+          uint8_t len = strlen(wireDiaInput);
+
+          if (wireDiaInputIndex >= len)
+            wireDiaInputIndex--;
+
+          wireDiaInput[wireDiaInputIndex] = '0';
+
+          if (wireDiaInputIndex > 0)
+            wireDiaInputIndex--;
+        }
+
+        printInputValues();
+      }
+
+      break;
+    }
+
+    case OperationState::Offset:
+    {
+      if (key == 'C') // Enter
+        startWinding();
+
+      else if (key == 'G') // F1
         com.println("Offset-First");
-      else if (key == 'H')
+      else if (key == 'H') // F2
         com.println("Offset-Second");
 
       break;
@@ -159,6 +303,40 @@ void readInputs()
       break;
     }
     }
+  }
+}
+
+void printInputValues()
+{
+  lcd.blink();
+
+  if (isInSecondRow == false)
+  {
+    lcd.setCursor(9, 0);
+    lcd.print(spirInput);
+
+    uint8_t len = strlen(spirInput);
+    lcd.setCursor(9 + (spirInputIndex < len ? spirInputIndex : len - 1), 0);
+  }
+  else
+  {
+    lcd.setCursor(9, 1);
+
+    char line[5];
+    sprintf(line, "%c.%c%c", wireDiaInput[0], wireDiaInput[1], wireDiaInput[2]);
+    lcd.print(line);
+
+    uint8_t len = strlen(wireDiaInput);
+
+    uint8_t cursorPos = wireDiaInputIndex;
+
+    if (wireDiaInputIndex > 0)
+      cursorPos++;
+
+    if (wireDiaInputIndex >= len)
+      cursorPos--;
+
+    lcd.setCursor(9 + cursorPos, 1);
   }
 }
 
@@ -176,6 +354,12 @@ void updateScreen()
       break;
     }
 
+    case OperationState::Offset:
+    {
+      showOffset();
+      break;
+    }
+
     case OperationState::Running:
     {
       showLive();
@@ -187,26 +371,84 @@ void updateScreen()
 
     screenNeedsUpdate = false;
   }
+
+  if (OpState == OperationState::Running)
+  {
+    updateRunningPartial();
+  }
+}
+
+unsigned long lastUpdatedAt = 0;
+uint16_t oldCurrentSpir, oldTotalSpir, oldSpeed = 0;
+
+void updateRunningPartial()
+{
+  if (millis() - lastUpdatedAt > 100)
+  {
+    lastUpdatedAt = millis();
+
+    if (currentSpir != oldCurrentSpir || oldTotalSpir != totalSpir)
+    {
+      lcd.setCursor(6, 1);
+      lcd.print("              ");
+      lcd.setCursor(6, 1);
+
+      char rest[15];
+      sprintf(rest, "%d / %d", currentSpir, totalSpir);
+      lcd.print(rest);
+
+      oldCurrentSpir = currentSpir;
+      oldTotalSpir = totalSpir;
+    }
+
+    speed = readSpeed();
+
+    if (oldSpeed != speed)
+    {
+      lcd.setCursor(6, 2);
+      lcd.print("              ");
+      lcd.setCursor(6, 2);
+
+      char rest[15];
+      sprintf(rest, "%d", speed);
+
+      lcd.print(rest);
+      oldSpeed = speed;
+    }
+  }
 }
 
 void showMain()
 {
   char lines[LCD_ROWS][LCD_COLS + 1] = {
-      {"SPIR:    610        "},
-      {"TEL CAP: 03.20mm    "},
-      {"F1: MOD: AUTO       "},
+      {"SPIR:    0000       "},
+      {"TEL CAP: 0.00mm     "},
+      {"#: MOD:  MANUEL     "},
       {"          ENT: BASLA"}};
 
   printScreen(lines);
+
+  printInputValues();
 }
 
 void showLive()
 {
   char lines[LCD_ROWS][LCD_COLS + 1] = {
-      {"TUR:  0 / 610       "},
-      {"HIZ:  30 rpm        "},
-      {"                    "},
+      {"    ----HAZIR----   "},
+      {"TUR:  0 / 0       "},
+      {"HIZ:  0 rpm        "},
       {"          ESC: IPTAL"}};
+
+  printScreen(lines);
+}
+
+void showOffset()
+{
+  char lines[LCD_ROWS][LCD_COLS + 1] = {
+      {"GENISLIK: -         "},
+      {"                    "},
+      {"                    "},
+      {"          ENT: BASLA"}};
 
   printScreen(lines);
 }
@@ -227,15 +469,32 @@ void printScreen(char lines[LCD_ROWS][LCD_COLS + 1])
   }
 }
 
-void startWinding()
+void startOffset()
 {
-  OpState = OperationState::Running;
+  lcd.noBlink();
+
+  totalSpir = (uint16_t)atol(spirInput);
+  currentSpir = 0;
+
+  wireDiameter = ((float)atol(wireDiaInput) / 100.0f);
+  speed = readSpeed();
+
+  OpState = OperationState::Offset;
   screenNeedsUpdate = true;
+
   //Offset, pedal ve motor devrede
 }
+void startWinding()
+{
+  lcd.noBlink();
+  OpState = OperationState::Running;
+  screenNeedsUpdate = true;
+}
 
-void playTone(uint8_t cycles, uint16_t tOn, uint16_t tOff) {
-  for(uint8_t i = 0; i < cycles; i++) {
+void playTone(uint8_t cycles, uint16_t tOn, uint16_t tOff)
+{
+  for (uint8_t i = 0; i < cycles; i++)
+  {
     digitalWrite(BUZZER_PIN, HIGH);
     delay(tOn);
     digitalWrite(BUZZER_PIN, LOW);
@@ -248,23 +507,67 @@ void keypadEvent(KeypadEvent key)
 {
   switch (customKeypad.getState())
   {
-    case PRESSED:
+  case PRESSED:
+    if (OpState == OperationState::Offset)
+    {
       if (key == 'A')
+      {
         com.println("Left");
+        Serial.println("Left");
+      }
       else if (key == 'B')
+      {
         com.println("Right");
-      else if (key == '5')
-        com.println("Work: 2.30|60|300");
+        Serial.println("Right");
+      }
+      /*else if (key == '5')
+        com.println("Work: 2.30|60|300");*/
+    }
 
-      break;
-      
-    case RELEASED:
-      /*/Serial.print("Released: ");
-      Serial.println(key);*/
+    break;
 
+  case RELEASED:
+    if (OpState == OperationState::Offset)
+    {
       if (key == 'A' || key == 'B')
+      {
+        Serial.println("Stop");
         com.println("Stop");
+      }
+    }
 
     break;
   }
+}
+
+const uint8_t numReadings = 10;
+
+uint16_t readings[numReadings];      // the readings from the analog input
+uint16_t readIndex = 0;              // the index of the current reading
+uint16_t total = 0;                  // the running total
+uint16_t average = 0;                // the average
+
+uint16_t readSpeed()
+{
+  uint8_t value = analogRead(SPEED_POT_PIN);
+  uint16_t result = (uint16_t)(map(value, 0, 255, 1, 400));
+
+  total = total - readings[readIndex];
+  // read from the sensor:
+  readings[readIndex] = result;
+  // add the reading to the total:
+  total = total + readings[readIndex];
+  // advance to the next position in the array:
+  readIndex++;
+
+  // if we're at the end of the array...
+  if (readIndex >= numReadings) {
+    // ...wrap around to the beginning:
+    readIndex = 0;
+  }
+
+  // calculate the average:
+  average = total / numReadings;
+  // send it to the computer as ASCII digits
+  return average;
 }
