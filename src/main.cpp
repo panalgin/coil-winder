@@ -10,7 +10,7 @@
 #define KEY_ROWS 5
 #define KEY_COLS 4
 
-#define PEDAL_PIN A7
+#define PEDAL_PIN 12
 #define BUZZER_PIN 13
 #define SPEED_POT_PIN A0
 
@@ -19,8 +19,6 @@ typedef enum
   None,
   Offset,
   Running,
-  Paused,
-  Finished,
 } OperationState;
 
 OperationState OpState;
@@ -55,6 +53,7 @@ float karkasSecondPos = -1.0f;
 
 uint16_t totalSpir = 0;
 uint16_t currentSpir = 0;
+uint16_t currentCycle = 0;
 uint16_t speed = 0;
 float wireDiameter = 0.0f;
 
@@ -77,8 +76,10 @@ void showOffset();
 void updateOffsetParameters();
 uint16_t readSpeed();
 void updateRunningPartial();
+void continueWork();
+void pauseWork();
 
-SoftwareSerial com(A3, A2);
+SoftwareSerial com(A3, 11);
 
 void setup()
 {
@@ -87,12 +88,15 @@ void setup()
   pinMode(PEDAL_PIN, INPUT_PULLUP);
   pinMode(SPEED_POT_PIN, INPUT);
 
-  digitalWrite(BUZZER_PIN, 0);
+  digitalWrite(BUZZER_PIN, LOW);
 
   Serial.begin(115200);
   com.begin(115200);
 
-  while (!com) {;}
+  while (!com)
+  {
+    ;
+  }
 
   lcd.init();
   lcd.backlight();
@@ -194,6 +198,7 @@ void parseMessage(String *message)
 }
 
 char lastKey = '\0';
+int8_t oldPedalState = -1;
 
 void readInputs()
 {
@@ -296,14 +301,47 @@ void readInputs()
 
       break;
     }
-
-    case OperationState::Running:
-    {
-
-      break;
-    }
     }
   }
+
+  if (OpState == OperationState::Running)
+  {
+    uint8_t pedalState = digitalRead(PEDAL_PIN);
+
+    if (oldPedalState != pedalState && pedalState == LOW)
+    {
+      Serial.println("Pedal: Low");
+      oldPedalState = pedalState;
+
+      continueWork();
+    }
+    else if (oldPedalState != pedalState && pedalState == HIGH)
+    {
+      Serial.println("Pedal: High");
+      oldPedalState = pedalState;
+
+      pauseWork();
+    }
+  }
+}
+
+void continueWork()
+{
+  String message = "Work: ";
+  message += currentCycle;
+  message += "|";
+  message += wireDiameter;
+  message += "|";
+  message += speed;
+
+  com.println(message);
+  Serial.println(message);
+}
+
+void pauseWork()
+{
+  com.println("Pause");
+  Serial.println("Pause");
 }
 
 void printInputValues()
@@ -383,7 +421,7 @@ uint16_t oldCurrentSpir, oldTotalSpir, oldSpeed = 0;
 
 void updateRunningPartial()
 {
-  if (millis() - lastUpdatedAt > 100)
+  if (millis() - lastUpdatedAt > 30)
   {
     lastUpdatedAt = millis();
 
@@ -542,32 +580,34 @@ void keypadEvent(KeypadEvent key)
 
 const uint8_t numReadings = 10;
 
-uint16_t readings[numReadings];      // the readings from the analog input
-uint16_t readIndex = 0;              // the index of the current reading
-uint16_t total = 0;                  // the running total
-uint16_t average = 0;                // the average
+uint16_t readings[numReadings]; // the readings from the analog input
+uint16_t readIndex = 0;         // the index of the current reading
+uint16_t total = 0;             // the running total
+uint16_t average = 0;           // the average
 
 uint16_t readSpeed()
 {
   uint8_t value = analogRead(SPEED_POT_PIN);
-  uint16_t result = (uint16_t)(map(value, 0, 255, 1, 400));
 
   total = total - readings[readIndex];
   // read from the sensor:
-  readings[readIndex] = result;
+  readings[readIndex] = value;
   // add the reading to the total:
   total = total + readings[readIndex];
   // advance to the next position in the array:
   readIndex++;
 
   // if we're at the end of the array...
-  if (readIndex >= numReadings) {
+  if (readIndex >= numReadings)
+  {
     // ...wrap around to the beginning:
     readIndex = 0;
   }
 
   // calculate the average:
   average = total / numReadings;
-  // send it to the computer as ASCII digits
-  return average;
+
+  uint16_t result = (uint16_t)(map(average, 0, 255, 1, 400));
+
+  return result;
 }
