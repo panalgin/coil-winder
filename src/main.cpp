@@ -253,6 +253,8 @@ void keypadEvent(KeypadEvent key)
         com.println("Left");
       else if (key == 'B')
         com.println("Right");
+      else if (key == '5')
+        com.println("Work: 2.30|60|300");
 
       break;
       
