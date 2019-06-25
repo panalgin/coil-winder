@@ -12,7 +12,8 @@
 
 #define PEDAL_PIN 12
 #define BUZZER_PIN 13
-#define SPEED_POT_PIN A0
+#define SPEED_POT_PIN A2
+#define SENSOR_PIN A1
 
 typedef enum
 {
@@ -78,6 +79,8 @@ uint16_t readSpeed();
 void updateRunningPartial();
 void continueWork();
 void pauseWork();
+void updateSpirStatus();
+void offsetMainMotor();
 
 SoftwareSerial com(A3, 11);
 
@@ -87,11 +90,12 @@ void setup()
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(PEDAL_PIN, INPUT_PULLUP);
   pinMode(SPEED_POT_PIN, INPUT);
+  pinMode(SENSOR_PIN, INPUT);
 
   digitalWrite(BUZZER_PIN, LOW);
 
   Serial.begin(115200);
-  com.begin(115200);
+  com.begin(2400);
 
   while (!com)
   {
@@ -103,6 +107,7 @@ void setup()
   watermark();
 
   customKeypad.addEventListener(keypadEvent); // Add an event listener for this keypad
+  offsetMainMotor();
 }
 
 void watermark()
@@ -199,6 +204,8 @@ void parseMessage(String *message)
 
 char lastKey = '\0';
 int8_t oldPedalState = -1;
+int8_t oldSensorState = -1;
+unsigned long lastSensorReadAt = 0;
 
 void readInputs()
 {
@@ -308,6 +315,7 @@ void readInputs()
   {
     uint8_t pedalState = digitalRead(PEDAL_PIN);
 
+
     if (oldPedalState != pedalState && pedalState == LOW)
     {
       Serial.println("Pedal: Low");
@@ -315,12 +323,26 @@ void readInputs()
 
       continueWork();
     }
-    else if (oldPedalState != pedalState && pedalState == HIGH)
+    else if (oldPedalState == LOW && oldPedalState != pedalState && pedalState == HIGH)
     {
       Serial.println("Pedal: High");
       oldPedalState = pedalState;
 
       pauseWork();
+    }
+
+    uint8_t sensorState = digitalRead(SENSOR_PIN);
+
+    if (millis() - lastSensorReadAt > 100) {
+
+
+      if (oldSensorState == LOW && oldSensorState != sensorState && sensorState == HIGH) {
+        lastSensorReadAt = millis();
+        currentSpir++;
+        updateSpirStatus();
+      }
+
+      oldSensorState = sensorState;
     }
   }
 }
@@ -473,8 +495,8 @@ void showLive()
 {
   char lines[LCD_ROWS][LCD_COLS + 1] = {
       {"    ----HAZIR----   "},
-      {"TUR:  0 / 0       "},
-      {"HIZ:  0 rpm        "},
+      {"TUR:  0 / 0         "},
+      {"HIZ:  0 rpm         "},
       {"          ESC: IPTAL"}};
 
   printScreen(lines);
@@ -578,36 +600,49 @@ void keypadEvent(KeypadEvent key)
   }
 }
 
-const uint8_t numReadings = 5;
-
-uint16_t readings[numReadings]; // the readings from the analog input
-uint16_t readIndex = 0;         // the index of the current reading
-uint16_t total = 0;             // the running total
-uint16_t average = 0;           // the average
+unsigned long  lastSpeedReadAt = 0;
+uint16_t oldResult = 0;
 
 uint16_t readSpeed()
 {
-uint8_t value = analogRead(SPEED_POT_PIN);
+  if (millis() - lastSpeedReadAt > 150) {
+    lastSpeedReadAt = millis();
 
-  total = total - readings[readIndex];
-  // read from the sensor:
-  readings[readIndex] = value;
-  // add the reading to the total:
-  total = total + readings[readIndex];
-  // advance to the next position in the array:
-  readIndex++;
+    uint16_t value = analogRead(SPEED_POT_PIN);
+    uint16_t result = (uint16_t)(map(value, 0, 1023, 1, 400));
 
-  // if we're at the end of the array...
-  if (readIndex >= numReadings)
-  {
-    // ...wrap around to the beginning:
-    readIndex = 0;
+    if (abs(oldResult - result) >= 1)
+      oldResult = result;
+
   }
 
-  // calculate the average:
-  average = total / numReadings;
+  return oldResult;
+}
 
-  uint16_t result = (uint16_t)(map(average, 3, 255, 1, 400));
+void updateSpirStatus() {
+  char line[16];
 
-  return result;
+  sprintf(line, "%u / %u", currentSpir, totalSpir);
+  lcd.setCursor(6, 1);
+  lcd.print(line);
+}
+
+void offsetMainMotor() {
+  com.println("Offset-Main");
+
+  uint8_t sensorState = digitalRead(SENSOR_PIN);
+  unsigned long lastReadAt = 0;
+
+  while(sensorState == LOW) {
+    if (millis() - lastReadAt > 20) {
+      sensorState = digitalRead(SENSOR_PIN);
+    }
+
+    if (sensorState == HIGH) {
+      break;
+    }
+  }
+
+  com.println("OMD");
+  playTone(4, 50, 25);
 }
