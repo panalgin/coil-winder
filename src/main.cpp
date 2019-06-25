@@ -578,7 +578,7 @@ void keypadEvent(KeypadEvent key)
   }
 }
 
-const uint8_t numReadings = 10;
+const uint8_t numReadings = 5;
 
 uint16_t readings[numReadings]; // the readings from the analog input
 uint16_t readIndex = 0;         // the index of the current reading
@@ -587,7 +587,7 @@ uint16_t average = 0;           // the average
 
 uint16_t readSpeed()
 {
-  uint8_t value = analogRead(SPEED_POT_PIN);
+uint8_t value = analogRead(SPEED_POT_PIN);
 
   total = total - readings[readIndex];
   // read from the sensor:
@@ -607,7 +607,7 @@ uint16_t readSpeed()
   // calculate the average:
   average = total / numReadings;
 
-  uint16_t result = (uint16_t)(map(average, 0, 255, 1, 400));
+  uint16_t result = (uint16_t)(map(average, 3, 255, 1, 400));
 
   return result;
 }
