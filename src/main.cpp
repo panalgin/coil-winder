@@ -95,7 +95,7 @@ void setup()
   digitalWrite(BUZZER_PIN, LOW);
 
   Serial.begin(115200);
-  com.begin(2400);
+  com.begin(57600);
 
   while (!com)
   {
@@ -334,8 +334,6 @@ void readInputs()
     uint8_t sensorState = digitalRead(SENSOR_PIN);
 
     if (millis() - lastSensorReadAt > 100) {
-
-
       if (oldSensorState == LOW && oldSensorState != sensorState && sensorState == HIGH) {
         lastSensorReadAt = millis();
         currentSpir++;
@@ -609,7 +607,7 @@ uint16_t readSpeed()
     lastSpeedReadAt = millis();
 
     uint16_t value = analogRead(SPEED_POT_PIN);
-    uint16_t result = (uint16_t)(map(value, 0, 1023, 1, 400));
+    uint16_t result = (uint16_t)(map(value, 0, 1023, 1, 350));
 
     if (abs(oldResult - result) >= 1)
       oldResult = result;
