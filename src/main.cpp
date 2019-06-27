@@ -188,6 +188,11 @@ void parseMessage(String *message)
     karkasFirstPos = firstPos;
     updateOffsetParameters();
   }
+  else if (message->startsWith("CycleFinished: ")) {
+    message->replace("CycleFinished: ", "");
+    uint16_t cycle = message->toInt();
+    currentCycle = cycle + 1;
+  }
   else if (message->startsWith("OSD: "))
   {
     playTone(2, 150, 50);
