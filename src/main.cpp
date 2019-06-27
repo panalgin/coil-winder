@@ -320,7 +320,6 @@ void readInputs()
   {
     uint8_t pedalState = digitalRead(PEDAL_PIN);
 
-
     if (oldPedalState != pedalState && pedalState == LOW)
     {
       Serial.println("Pedal: Low");
@@ -338,8 +337,8 @@ void readInputs()
 
     uint8_t sensorState = digitalRead(SENSOR_PIN);
 
-    if (millis() - lastSensorReadAt > 100) {
-      if (oldSensorState == LOW && oldSensorState != sensorState && sensorState == HIGH) {
+    if (millis() - lastSensorReadAt > 10) {
+      if (oldSensorState == HIGH && oldSensorState != sensorState && sensorState == LOW) {
         lastSensorReadAt = millis();
         currentSpir++;
         updateSpirStatus();
@@ -636,12 +635,12 @@ void offsetMainMotor() {
   uint8_t sensorState = digitalRead(SENSOR_PIN);
   unsigned long lastReadAt = 0;
 
-  while(sensorState == LOW) {
-    if (millis() - lastReadAt > 20) {
+  while(sensorState == HIGH) {
+    if (millis() - lastReadAt > 10) {
       sensorState = digitalRead(SENSOR_PIN);
     }
 
-    if (sensorState == HIGH) {
+    if (sensorState == LOW) {
       break;
     }
   }
