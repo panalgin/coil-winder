@@ -44,10 +44,12 @@ LiquidCrystal_I2C lcd(0x3F, 20, 4);
 
 char spirInput[5] = {'0', '0', '0', '0'};
 char wireDiaInput[4] = {'0', '0', '0'};
+char karkasInput[5] = {'0', '0', '0', '0'};
 
 uint8_t spirInputIndex = 0;
 uint8_t wireDiaInputIndex = 0;
 bool isInSecondRow = false;
+uint8_t karkasInputIndex = 0;
 
 float karkasFirstPos = -1.0f;
 float karkasSecondPos = -1.0f;
@@ -81,6 +83,7 @@ void continueWork();
 void pauseWork();
 void updateSpirStatus();
 void offsetMainMotor();
+void offsetVargelMotor();
 
 SoftwareSerial com(A3, 11);
 
@@ -108,6 +111,7 @@ void setup()
 
   customKeypad.addEventListener(keypadEvent); // Add an event listener for this keypad
   offsetMainMotor();
+  offsetVargelMotor();
 }
 
 void watermark()
@@ -161,17 +165,19 @@ void readComm()
 
 void updateOffsetParameters()
 {
-  lcd.setCursor(0, 0);
-
-  if (karkasSecondPos >= 0)
+  if (OpState == OperationState::Offset)
   {
-    char line[21];
-    lcd.print("                    ");
-    String rep = String(karkasSecondPos);
-    sprintf(line, "GENISLIK: %smm", rep.c_str());
+    if (karkasSecondPos >= 0)
+    {
+      char line[21];
+      lcd.setCursor(0, 0);
+      lcd.print("                    ");
+      String rep = String(karkasSecondPos);
+      sprintf(line, "GENISLIK: %smm", rep.c_str());
 
-    lcd.setCursor(0, 0);
-    lcd.print(line);
+      lcd.setCursor(0, 0);
+      lcd.print(line);
+    }
   }
 }
 
@@ -188,7 +194,8 @@ void parseMessage(String *message)
     karkasFirstPos = firstPos;
     updateOffsetParameters();
   }
-  else if (message->startsWith("CycleFinished: ")) {
+  else if (message->startsWith("CycleFinished: "))
+  {
     message->replace("CycleFinished: ", "");
     uint16_t cycle = message->toInt();
     currentCycle = cycle + 1;
@@ -303,13 +310,48 @@ void readInputs()
 
     case OperationState::Offset:
     {
-      if (key == 'C') // Enter
-        startWinding();
+      if (key == 'C') { //Enter
+        float width = (float)(atol(karkasInput) / 100.0f);
 
-      else if (key == 'G') // F1
-        com.println("Offset-First");
-      else if (key == 'H') // F2
-        com.println("Offset-Second");
+        if (width > 0.00f) {
+          com.print("Offset-Second ");
+          com.println(width);
+
+          delay(500);
+          startWinding();
+        }
+      } 
+
+      else if (key == 'D')
+      {
+          uint8_t len = strlen(karkasInput);
+
+          if (karkasInputIndex >= len)
+            karkasInputIndex--;
+
+          karkasInput[karkasInputIndex] = '0';
+
+          if (karkasInputIndex > 0)
+            karkasInputIndex--;
+
+          printInputValues();
+      }
+
+      else if (isDigit(key))
+      {
+        uint8_t pos = strlen(karkasInput);
+
+        if (karkasInputIndex == pos)
+          karkasInputIndex--;
+
+        if (karkasInputIndex < pos)
+        {
+          karkasInput[karkasInputIndex] = key;
+          karkasInputIndex++;
+        }
+
+        printInputValues();
+      }
 
       break;
     }
@@ -337,8 +379,10 @@ void readInputs()
 
     uint8_t sensorState = digitalRead(SENSOR_PIN);
 
-    if (millis() - lastSensorReadAt > 10) {
-      if (oldSensorState == HIGH && oldSensorState != sensorState && sensorState == LOW) {
+    if (millis() - lastSensorReadAt > 10)
+    {
+      if (oldSensorState == HIGH && oldSensorState != sensorState && sensorState == LOW)
+      {
         lastSensorReadAt = millis();
         currentSpir++;
         updateSpirStatus();
@@ -372,33 +416,56 @@ void printInputValues()
 {
   lcd.blink();
 
-  if (isInSecondRow == false)
+  if (OpState == OperationState::None)
   {
-    lcd.setCursor(9, 0);
-    lcd.print(spirInput);
+    if (isInSecondRow == false)
+    {
+      lcd.setCursor(9, 0);
+      lcd.print(spirInput);
 
-    uint8_t len = strlen(spirInput);
-    lcd.setCursor(9 + (spirInputIndex < len ? spirInputIndex : len - 1), 0);
+      uint8_t len = strlen(spirInput);
+      lcd.setCursor(9 + (spirInputIndex < len ? spirInputIndex : len - 1), 0);
+    }
+    else
+    {
+      lcd.setCursor(9, 1);
+
+      char line[5];
+      sprintf(line, "%c.%c%c", wireDiaInput[0], wireDiaInput[1], wireDiaInput[2]);
+      lcd.print(line);
+
+      uint8_t len = strlen(wireDiaInput);
+
+      uint8_t cursorPos = wireDiaInputIndex;
+
+      if (wireDiaInputIndex > 0)
+        cursorPos++;
+
+      if (wireDiaInputIndex >= len)
+        cursorPos--;
+
+      lcd.setCursor(9 + cursorPos, 1);
+    }
   }
-  else
+  else if (OpState == OperationState::Offset)
   {
-    lcd.setCursor(9, 1);
+    lcd.setCursor(10, 0);
 
-    char line[5];
-    sprintf(line, "%c.%c%c", wireDiaInput[0], wireDiaInput[1], wireDiaInput[2]);
+    char line[6];
+    sprintf(line, "%c%c.%c%c", karkasInput[0], karkasInput[1], karkasInput[2], karkasInput[3]);
     lcd.print(line);
 
-    uint8_t len = strlen(wireDiaInput);
+    uint8_t len = strlen(karkasInput);
 
-    uint8_t cursorPos = wireDiaInputIndex;
+    uint8_t cursorPos = karkasInputIndex;
 
-    if (wireDiaInputIndex > 0)
+    if (karkasInputIndex > 1)
       cursorPos++;
 
-    if (wireDiaInputIndex >= len)
+    if (karkasInputIndex >= len)
       cursorPos--;
 
-    lcd.setCursor(9 + cursorPos, 1);
+    lcd.setCursor(10 + cursorPos, 0);
   }
 }
 
@@ -507,12 +574,15 @@ void showLive()
 void showOffset()
 {
   char lines[LCD_ROWS][LCD_COLS + 1] = {
-      {"GENISLIK: -         "},
-      {"                    "},
-      {"                    "},
+      {"GENISLIK: 00.00mm   "},
+      {"BAS:                "},
+      {"SON:                "},
       {"          ENT: BASLA"}};
 
   printScreen(lines);
+
+  lcd.setCursor(10, 0);
+  lcd.blink();
 }
 
 void printScreen(char lines[LCD_ROWS][LCD_COLS + 1])
@@ -538,7 +608,7 @@ void startOffset()
   totalSpir = (uint16_t)atol(spirInput);
   currentSpir = 0;
 
-  wireDiameter = ((float)atol(wireDiaInput) / 100.0f);
+  wireDiameter = ((float)atol(wireDiaInput) / 100.0f) + 0.06f;
   speed = readSpeed();
 
   OpState = OperationState::Offset;
@@ -602,12 +672,13 @@ void keypadEvent(KeypadEvent key)
   }
 }
 
-unsigned long  lastSpeedReadAt = 0;
+unsigned long lastSpeedReadAt = 0;
 uint16_t oldResult = 0;
 
 uint16_t readSpeed()
 {
-  if (millis() - lastSpeedReadAt > 150) {
+  if (millis() - lastSpeedReadAt > 150)
+  {
     lastSpeedReadAt = millis();
 
     uint16_t value = analogRead(SPEED_POT_PIN);
@@ -615,13 +686,13 @@ uint16_t readSpeed()
 
     if (abs(oldResult - result) >= 1)
       oldResult = result;
-
   }
 
   return oldResult;
 }
 
-void updateSpirStatus() {
+void updateSpirStatus()
+{
   char line[16];
 
   sprintf(line, "%u / %u", currentSpir, totalSpir);
@@ -629,18 +700,27 @@ void updateSpirStatus() {
   lcd.print(line);
 }
 
-void offsetMainMotor() {
+void offsetVargelMotor()
+{
+  com.println("Offset-First");
+}
+
+void offsetMainMotor()
+{
   com.println("Offset-Main");
 
   uint8_t sensorState = digitalRead(SENSOR_PIN);
   unsigned long lastReadAt = 0;
 
-  while(sensorState == HIGH) {
-    if (millis() - lastReadAt > 10) {
+  while (sensorState == HIGH)
+  {
+    if (millis() - lastReadAt > 10)
+    {
       sensorState = digitalRead(SENSOR_PIN);
     }
 
-    if (sensorState == LOW) {
+    if (sensorState == LOW)
+    {
       break;
     }
   }
